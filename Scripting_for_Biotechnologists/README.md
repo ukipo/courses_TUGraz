@@ -8,4 +8,4 @@ The repository contains lab assignments and final project completed in the cours
 - Regular expression in Python
 
 # Submitted files
-The submitted files represent completed challenges from the above-mentioned topics and a short report summarizing the completed work, which was intended for course evaluation.
+The submitted files represent completed challenges from the above-mentioned topics.
