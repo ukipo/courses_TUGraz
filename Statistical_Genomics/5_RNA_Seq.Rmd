@@ -1,0 +1,276 @@
+---
+title: "Lab 5: RNA-Seq Analysis"
+author: "Urska Pogorevcnik"
+date: "11/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Mapping RNA-seq reads with `HISAT2`
+# 3.1 index reference genome
+First, index the genome with the provided command. I included the full path to `HISSAT2` but left the relative path to the genome file.
+
+```{r index-genome, eval=FALSE}
+~/StatGen/week4/tools/hisat2-2.2.1/hisat2-build ./Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa
+```
+
+# 3.2 Map the reads
+
+Create a directory within the data directory (current) called "results".
+
+```{r 3-2-create-results, eval=FALSE}
+mkdir ./results
+```
+
+Run HISAT2 on all .fasq files in your directory with the following bash script.  
+Note: HISSAT2 appears to have a bug and can't create files in the results directory. Provided bash script adapted to create files in root directory and subsequently move them to the desired directory.
+
+```{r map-reads-fastq, eval=FALSE}
+bash ./map_reads_fastq.sh
+```
+
+Here is what the script looks like:
+
+```{r map-reads-script, eval=FALSE}
+#!/bin/bash
+
+# Map the reads with HISAT2
+# Run in data directory
+files='SRR064154.fastq SRR064155.fastq SRR064166.fastq SRR064167.fastq'
+for input in $files
+do
+  ~/StatGen/week4/tools/hisat2-2.2.1/hisat2 -q -x Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa -U $input -S ~/$input".sam"
+  mv ~/$input".sam" ~/StatGen/lab5/data/results
+done
+```
+
+Transform into .bam files with the following bash script.
+
+```{r sam-to-bam, eval=FALSE}
+bash ./sam_to_bam.sh
+```
+
+Here is what the script looks like:
+
+```{r sam-to-bam-script, eval=FALSE}
+#!/bin/bash
+
+# Transform .sam files to .bam files
+# Run in data directory
+files='SRR064154.fastq SRR064155.fastq SRR064166.fastq SRR064167.fastq'
+for input in $files
+do
+  ~/StatGen/week4/tools/samtools-bcftools-htslib-1.0_x64-linux/bin/samtools view -bS results/$input".sam" > results/$input".bam"
+done
+```
+
+
+# 4 Counting the reads overlapping with certain genomic features
+## 4.1 Importing annotation data into R
+
+Install the `rtracklayer` package from Bioconductor.
+
+```{r instal-rtracklayer, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("rtracklayer")
+```
+
+Load the library.
+
+```{r load-rtracklayer, message=FALSE, error=FALSE, warning=FALSE}
+library(rtracklayer)
+```
+
+Import genome.
+
+```{r import-genome}
+gtf <- import("Arabidopsis_thaliana.TAIR10.48.gtf.gz")
+class(gtf)
+```
+
+Look at the first two rows of the imported file in `gtf`.
+
+```{r head-gtf}
+head(gtf, 2)
+```
+
+Exclude NA values.
+
+```{r exclude-NA}
+idx <- !is.na(mcols(gtf)$type) & !is.na(mcols(gtf)$gene_biotype)
+genes_gtf <- gtf[idx]
+```
+
+Select only the protein-coding features according the the `type` column (has to be "gene") and the `gene_biotype` column (has to be "protein_coding").
+
+```{r select-protein-coding}
+idx <- mcols(genes_gtf)$type == "gene" & mcols(genes_gtf)$gene_biotype == "protein_coding"
+
+genes_gtf <- genes_gtf[idx]
+```
+
+Split by gene identifier. Use this to compute the number of reads in each library overlapping each gene in the _Arabidopsis thaliana_ genome.
+
+```{r split-by-gene-identifier-and-count}
+genes_gtf <- split(genes_gtf, mcols(genes_gtf)$gene_id)
+genes_gtf
+```
+
+## Counting reads with `summarizeOverlaps`
+
+First, install the `Rsamtools` and `GenomicAlignments` packages.
+
+```{r install-packages, eval=FALSE}
+BiocManager::install(c("Rsamtools", "GenomicAlignments"))
+```
+
+And load them of course. :)
+
+```{r load-Rsamtools-GenomicAligments, message=FALSE, error=FALSE, warning=FALSE}
+library(Rsamtools)
+library(GenomicAlignments)
+```
+
+In the preparatory steps, a text file called "targets.txt" was generated, describing the FASTQ files we worked with.
+
+Read it into R.
+
+```{r read-targets-txt, warning=FALSE}
+targets <- read.delim("targets.txt")
+targets
+```
+
+We can now count the reads. Pass the mapped reads generated in the third chapter as arguments of `summarizeoverlaps()`. One way to do this is over a `BamFileList` object.
+
+```{r arguments-over-BamFileList}
+samples <- as.character(targets$FASTQFile)
+samplespath <- paste("./results/", samples, ".bam", sep="")
+names(samplespath) <- samples
+bfl <- BamFileList(samplespath, yieldSize=50000, index=character())
+```
+
+Now count the reads overlapping the genomic features you saved in `genes_gtf`.
+Use the `Union` mode to read those that overlap any portion of exactly ONE feature.
+
+```{r read-counts-summarizeoverlaps, warning=FALSE}
+countDF <- summarizeOverlaps(genes_gtf, bfl, mode="Union", ignore.strand=TRUE)
+countDF
+```
+
+See the `assays` field? They're hiding there! Define them to a new object.
+
+```{r count-them-overlps}
+countDF <- assays(countDF)$counts
+head(countDF, n=3)
+```
+
+Don't forget to save them.
+
+```{r save-counts-table}
+write.table(countDF, "counted_overlaps.txt")
+#and once without quotes
+write.table(countDF, "counted_overlaps2.txt", quote = FALSE)
+```
+
+
+# 5 Testing for differential expression with the `DESeq2` R package
+
+We need the `DESeq2` library for this part. Install the library and load it.
+
+```{r install-DESeq2, eval=FALSE}
+BiocManager::install("DESeq2")
+```
+
+```{r load DESeq2}
+library(DESeq2)
+```
+
+You need to specify which factor(s) in your metadata are relevant for the experimental design.
+
+Take a look at the conditions of your samples.
+
+```{r see-conditions}
+levels(targets$Condition)
+```
+
+Mine is a character vector. Convert it to a factor.
+
+```{r conditions-to factor}
+targets$Condition <- as.factor(targets$Condition)
+class(targets$Condition)
+levels(targets$Condition)
+```
+
+To perform the differential expression analysis, we need:
+1. a table with the counts for each gene and each RNA-seq library <- `countDF`;
+2. a table with metadata describing the samples <- `targets`;
+3. an experimental design formula <- `~Condition`
+
+Create a `DESeqDataSet` object to store the read counts and intermediate calculations needed for the differential expression analysis.
+
+```{r create-DESeqDataSet}
+dds <- DESeqDataSetFromMatrix(countData = countDF, colData = targets, design = ~Condition)
+```
+
+## 5.2 Running the `DESeq2` pipeline
+
+It's time to run the differential expression analysis! You can do that with `DESeq`, or alternatively in three separate steps.
+
+```{r DESeq2}
+dds <- DESeq(dds)
+```
+
+## 5.3 Inspecting the results
+
+We've successfully computed the _thing_ and gotten our Wald statistics. Now we can see if our P-values support ditching the null hypothesis of "no changes in the expression" for each gene.  
+In a nutshell: all of the genes with a P-value below the cut-off are considered differentially expressed.
+
+Extract the results, one for alpha=0.01 and one for alpha=0.05.
+
+```{r extract-results}
+res <- results(dds)
+res5 <- results(dds, alpha=0.05)
+```
+
+The results have two columns. Take a look!
+
+```{r}
+mcols(res)
+```
+
+`baseMean` is the average of the normalized count values over all samples.
+
+`log2FoldChange` tells us about how different the expression is compared to the control--that is the condition AP3 in our case--expressed in a logarithmic scale.  
+This means that if it's above 1, the gene is expressed more under the TRL condition, and if it is less than 1, the gene has greater expression under AP3 conditions.
+
+`lfcSE` is the standard error estimate for the log_2 fold change estimate.
+
+`stat` is the Wald statistic and `pvalue` is the P-value of the test.
+
+Of course the P-value has to be adjusted for multiple testing. You can find the adjusted values in `padj`.
+
+And now for the final results! Drum roll....
+
+```{r results-of-this}
+res
+```
+
+And finally, let's look at all those with differential expression:
+
+```{r dif-expr}
+#cut-off 0.01
+summary(res)
+## how many?
+sum(res$padj < 0.1, na.rm=TRUE)
+
+# cut-off 0.05
+summary(res5)
+## how many?
+sum(res$padj < 0.05, na.rm=TRUE)
+```
+

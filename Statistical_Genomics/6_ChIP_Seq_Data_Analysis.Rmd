@@ -1,0 +1,264 @@
+---
+title: "Lab 6: ChIP-Seq Data Analysis"
+author: "Urska Pogorevcnik"
+date: "30.11.2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 2 Preak calling with MACS2
+
+2. Run MACS2 as follows:
+```{r eval=FALSE}
+macs2 callpeak -t $data_path/ENCFF181MED.Chr12.bam \
+  -c $data_path/ENCFF356DXM.Chr12.control.bam \
+  -f BAM -g 2.8e9 \
+  -n $out_path/ENCFF181MED.Chr12.out.bam
+
+# hESC 1
+$macs2 callpeak -t data/hESC/ENCFF181MED.Chr12.bam -c data/hESC/ENCFF356DXM.Chr12.control.bam -f BAM -g 2.8e9 -n macs2/results/ENCFF181MED.Chr12.out.bam
+
+# hESC 2
+$macs2 callpeak -t data/hESC/ENCFF696NWL.Chr12.bam -c data/hESC/ENCFF356DXM.Chr12.control.bam -f BAM -g 2.8e9 -n macs2/results/ENCFF696NWL.Chr12.out.bam
+
+# K562 1
+$macs2 callpeak -t data/K562/ENCFF032JWA.Chr12.bam -c data/K562/ENCFF335IPE.Chr12.control.bam -f BAM -g 2.8e9 -n macs2/results/ENCFF032JWA.Chr12.out.bam
+
+# K562 2
+$macs2 callpeak -t data/K562/ENCFF252WJR.Chr12.bam -c data/K562/ENCFF335IPE.Chr12.control.bam -f BAM -g 2.8e9 -n macs2/results/ENCFF252WJR.Chr12.out.bam
+```
+
+3. Examine the output files
+
+  A file was created for each data sample as described. Examine it.
+
+4. How many peaks were called in each sample?
+```{r eval=FALSE}
+# before
+wc -l ENCFF*_peaks.narrowPeak
+  2045 ENCFF032JWA.Chr12.out.bam_peaks.narrowPeak
+   341 ENCFF181MED.Chr12.out.bam_peaks.narrowPeak
+   844 ENCFF252WJR.Chr12.out.bam_peaks.narrowPeak
+   302 ENCFF696NWL.Chr12.out.bam_peaks.narrowPeak
+  3532 total
+
+# after
+wc -l ENCFF*_peaks.narrowPeak
+  253 ENCFF032JWA.Chr12.out.bam_peaks.narrowPeak
+  341 ENCFF181MED.Chr12.out.bam_peaks.narrowPeak
+   47 ENCFF252WJR.Chr12.out.bam_peaks.narrowPeak
+  302 ENCFF696NWL.Chr12.out.bam_peaks.narrowPeak
+  943 total
+```
+
+5. Start R and run the _model.R scripts. (note: you can run an R script from the command line as: Rscript
+ENCFF181MED.Chr12.out.bam_model.r)
+
+The script should produce a .pdf file in your output directory. Open the file.
+
+```{r insert-images, echo = FALSE, message=FALSE, fig.align='center', fig.cap='ENCFF181MED', out.width='0.75\\linewidth', fig.pos='H'}
+knitr::include_graphics("ENCFF181MED.Chr12.out.bam_model.pdf")
+```
+
+All of the samples showed clearly defined peaks. The sample ENCFF181MED shows correlation peaks at two different positions of lab between the + and - strands.
+
+# 3 Differential binding analysis with R
+
+6. If necessary, install and load the `DiffBind` R/Bioconductor package.
+```{r diffbind-install, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("DiffBind")
+```
+
+```{r DiffBind, message=FALSE, error=FALSE, warning=FALSE}
+library(DiffBind)
+library(tidyr)
+library(dplyr)
+```
+
+## 3.1 Consensus peakset (Occupancy Analysis)
+
+7.Generate a comma-separated value (.csv) metafile `samples.csv` containing following columns, and one line for each sample.  
+
+The actual peaksets can be read using the `dba()` function of the `DiffBind` package:
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
+peaksets <- "samples.csv"
+encode <- dba(sampleSheet=peaksets)
+```
+
+The result is a `DBA` object. Type `“encode”` to retrieve the metadata associated with this object.
+
+```{r}
+class(encode)
+encode
+```
+
+8. How many peaksets have you read?
+
+  4 peaksets were read, one for each sample.
+
+How many peaks are contained in each peakset?
+```{r}
+nrow(encode$peaks[[1]])
+nrow(encode$peaks[[2]])
+nrow(encode$peaks[[3]])
+nrow(encode$peaks[[4]])
+```
+
+How many consensus peaks have been computed?
+```{r}
+nrow(encode$merged)
+```
+
+9. Based on the consensus peaks and their scores (here, -- log10 of the MACS2 P-values), generate a heatmap displaying the Pearson correlation coefficients between pairs of samples:
+
+```{r heatmap-macs2-pvalues, error=FALSE, cache=TRUE}
+dba.plotHeatmap(encode,margin=15)
+```
+
+  We can see the samples cluster together as expected - ENCFF181MED and ENCFF696NWL (on the right) are the two replicates of the H1-hESC sample, while ENCFF032JWA and ENCFF252WJR on the left represent the K562 sample. The heat map shows correlation between replicates and not between samples. The correlation of the sample to itself is, of course, 1.
+
+## 3.2 Counting reads - Binding affinity matrix
+
+  Re-center the consensus peaks around their point of greatest enrichment and adjust the width to the value of 250 bp.
+
+```{r recenter-peaks, message=FALSE, cache=TRUE}
+encode <- dba.count(encode, summits=250)
+encode
+```
+
+10. What is the FRiP? How do you interpret this result?
+
+  It is a measure of quality control that tells us about the how successful the precipitation was. It represents the fraction of reads that fall into a peak. Our percentages are very low, suggesting that our data could be of bad quality.
+
+11. Based on the binding affinities of the consensus peaks, generate a heatmap displaying the Pearson correlation coefficients between pairs of samples:
+
+```{r heatmap-consensus-peaks, error=FALSE, cache=TRUE, cache=TRUE}
+dba.plotHeatmap(encode,margin=15)
+```
+
+Do the samples cluster as expected? Are there any differences compared to the analysis you performed in the previous section?  
+
+  The samples cluster as before, but their correlation is now much surer between replicates and less between samples.
+
+12. A principal component analysis (PCA) based on the affinity scores of all consensus peaks can be obtained with the dba.plotPCA function:
+
+```{r PCA-affinity-scores, cache=TRUE}
+dba.plotPCA(encode, label=DBA_CONDITION)
+```
+
+What do you conclude from the PCA?
+
+  It shows how the variance of the samples. The PCA plot "flattens" the many variables in the sample in a small number of unrelated components representing a portion of the variability in the original sample. The loadings (percentages) of these components represent how correlated the expression of the summarized variables is.
+  
+  From the plot, we can see that the replicates of the separate conditions are similar in the first component. They do differ on the second component, though the variability is similar between the samples. It could possibly be due to sample variation.
+
+
+## 3.3 Differential binding affinity analysis
+
+To specify the sample groups you can use the dba.contrast() function:
+
+```{r specify-sample-groups, cache=TRUE}
+encode <- dba.contrast(encode, categories=DBA_CONDITION, minMembers=2)
+```
+
+  Since we only have two replicates per group, the minimum number of replicates in each sample group is adjusted to 2. We have also specified that the samples should be grouped by the `Condition` column
+
+13. How many sample groups do you expect? Which samples will be in each group?
+
+  ENCFF181MED and ENCFF696NWL are expected to group together as replicates of the H1-hESC condition, while ENCFF032JWA and ENCFF252WJR group together as replicates of the K562 sample.
+
+```{r how-many-sample-groups}
+dba.show(encode, bContrasts=TRUE)
+```
+
+The differential analysis is executed by the `dba.analyze()` function:
+
+```{r differential-analysis, message=FALSE, cache=TRUE}
+encode <- dba.analyze(encode)
+encode
+```
+
+229 (out of 494) peaks are identified as being significantly differentially bound (DB) using the default FDR threshold of 0.05.
+
+14. Generate a heatmap based on the DB peaks:
+
+```{r heatmap-db-peaks, cache=TRUE}
+dba.plotHeatmap(encode,margin=15,contrast=1)
+```
+
+15. A PCA based on the affinity scores of the DB peaks can be obtained as follows:
+
+```{r PCA-affinity-db-peaks, cache=TRUE}
+dba.plotPCA(encode, contrast=1, label=DBA_CONDITION)
+```
+
+What do you conclude from the heatmap and the PCA?
+
+  The correlation is much better as in the previous plot, though the K562 replicates still vary.
+
+You can use the dba.report() function to retrieve the differentially bound (DB) peaks:
+
+```{r differentially-bound-peaks, cache=TRUE}
+encode.DB <- dba.report(encode, contrast=1)
+encode.DB %>% as.data.frame() %>% dim #number of DB sites
+```
+
+16. Convert the object encode.DB into a data frame and print to a file.
+
+```{r convert-to-dataframe}
+encode.DB %>% as.data.frame() %>% write.csv("encode-DB.csv")
+```
+
+
+17. How many of the consensus peaks are more strongly bound by POU5F1 in hESC cells? How many of the consensus peaks are more strongly bound by POU5F1 in K562 cells?
+
+```{r how-many-stronly-bound}
+# More strongly bound in hESC
+length(which(encode.DB$Fold>0))
+
+# More strongly bound in K562
+length(which(encode.DB$Fold<0))
+```
+```
+
+18. Create a BED file for each set of differentially bound peaks. We will write these regions to file and use as input for downstream visualization.
+
+```{r create-bed-files-and-write-enriched-to-files}
+# Create bed files for each keeping only significant peaks (p < 0.05)
+enrich <- encode.DB %>% as.data.frame() %>%
+  select(FDR,seqnames, start, end) %>%
+  filter(FDR < 0.05) %>%
+  select(seqnames, start, end)
+# Write to file
+write.table(enrich, file="enriched.bed", sep="\t", quote=F, row.names=F, col.names=F)
+```
+
+19. To visualize our results in igv, first we need to generate index files with samtools. For each sample, generate a corresponding index file with
+
+```{r index-files-with-samtools, eval=FALSE}
+#hESC 1
+~/StatGen/week4/tools/samtools-bcftools-htslib-1.0_x64-linux/bin/samtools index data/hESC/ENCFF181MED.Chr12.bam
+
+#hESC2
+~/StatGen/week4/tools/samtools-bcftools-htslib-1.0_x64-linux/bin/samtools index data/hESC/ENCFF696NWL.Chr12.bam
+
+#K562 1
+~/StatGen/week4/tools/samtools-bcftools-htslib-1.0_x64-linux/bin/samtools index data/K562/ENCFF032JWA.Chr12.bam
+
+#K562 2
+~/StatGen/week4/tools/samtools-bcftools-htslib-1.0_x64-linux/bin/samtools index data/K562/ENCFF252WJR.Chr12.bam
+```
+
+20. Load the BED file containing the differentially bound peaks as well as the mapping bam files for one sample and the control of each cell line into igv.
+
+Zoom into the first DB region in the genome:  `chr12:11,761,860-11,762,380`
+
+Can you make sense of what you see when comparing to the encode.DB Granges object? Explore other positions on Chr12 according to the bed file
+
+  The regions stated in encode.DB have reads mapped against them. We can see that in a visual representation in IGV. The aim is to identify differential binding sites - calling up these regions in IGV, we see that both replicates of one sample have much more reads mapped to the sequence than the two replicates of the other codition.

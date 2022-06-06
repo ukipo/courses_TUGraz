@@ -1,0 +1,587 @@
+---
+title: "Lab 3: Microarray Analysis"
+author: "Urska Pogorevcnik"
+date: "10/20/2021 - 11/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Affymetrix GeneChips Analysis with R/Bioconductor
+
+## Importing data
+
+### The Gene Expression Omnibus
+
+> ::: {style="background-color: lightgray"}
+> What was the aim of the study by Browning et al? Open your favoriteWeb Browser, go to <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=> GSE20986, and download the .CEL files for the GEO accession numbers in the table. Note that the entire dataset consists of 12 microarrays, but we will only be using six. 2. Create a folder called "GSE20986" and move the .CEL files into the folder. 3. Using your favorite plain text editor (e.g., Notepad), type the following information: FileName Target GSM524662.CEL iris GSM524663.CEL retina GSM524664.CEL retina GSM524665.CEL iris GSM524666.CEL retina GSM524667.CEL iris • Use tab character to separate the fields. Save it as a plain text file called "phenodata.txt". This file describes the experimental factors. 4. The .CEL files can be imported into R using the "simpleaffy" R/BiocManager package as follows
+> :::
+
+Instal the packages:
+
+```{r BiocManager-instal-simpleaffy, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages(BiocManager)}
+BiocManager::install(version = "3.12")
+BiocManager::install("simpleaffy", force = TRUE)
+```
+
+Load libraries:
+
+```{r libraries-biocmanager-simpleaffy, message=FALSE, warning=FALSE, error=FALSE}
+library(BiocManager)
+library(simpleaffy)
+```
+
+> ::: {style="background-color: lightgray"}
+> 5.  Use the function read.affy() to read the .CEL and "phenodata.txt" files into an object named "celfiles". "celfiles" is an "AffyBatch" object. You can verify it using the class() function.
+> :::
+
+Read .CEL files into object and check object class as described.
+
+```{r read-cel-phenodata, cache=TRUE}
+celfiles <- read.affy("phenodata.txt", path = "GSE20986")
+class(celfiles)
+```
+
+> ::: {style="background-color: lightgray"}
+> 6.  Obtain a summary of the celfiles object by typing its name.
+> :::
+
+```{r summary-celfiles, message=FALSE, warning=FALSE, error=FALSE}
+celfiles
+```
+
+> ::: {style="background-color: lightgray"}
+> • Based on the information obtained, can you find the product page on the website of the microarray manufacturer? What organism is this product for? Which genes are represented on the microarray?
+> :::
+
+The chip is designed for investigation of *Homo sapiens*. On it, the following is represented: "Complete coverage of the Human Genome U133 Set plus 6,500 additional genes for analysis of over 47,000 transcripts."
+
+More information can be found on the following [link](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GPL570).
+
+> ::: {style="background-color: lightgray"}
+> • How many samples have you read?\
+> • How many genes are represented on each microarray? Are these really genes?
+> :::
+
+6 samples were read, with 54675 "genes" represented on the array. These refer to probe sets, with the number of actual genes being \>38,500 according to the manufacturer. Information from the ThermoFisher HG-U133 arrays [datasheet](http://tools.thermofisher.com/content/sfs/brochures/hgu133arrays_datasheet.pdf).
+
+> ::: {style="background-color: lightgray"}
+> In addition to the intensities, the AffyBatch object contains information about the microarray experiments:\
+> • What are these three functions doing? What kind of information do they provide?
+> :::
+
+These functions provide information on the "phenotypic data (e.g., covariates) and meta-data (e.g., descriptions of covariates) associated with an experiment."\
+`phenoData` provides information on variable values and meta-data.
+
+```{r phenoData}
+phenoData(celfiles)
+```
+
+`pData` returns a dataframe with the samples as rows and variables as columns.
+
+```{r pData}
+pData(celfiles)
+```
+
+`varLabels` returns the measured variables.
+
+```{r varLabels}
+varLabels(celfiles)
+```
+
+## Quality control
+
+> ::: {style="background-color: lightgray"}
+> As with other high-throughput technologies, quality control (QC) is a fundamental aspect of the analysis process. Data quality can be checked using various diagnostic plots.
+> :::
+
+### Overall quality of the microarrays
+
+> ::: {style="background-color: lightgray"}
+> The image() function creates an image of colors or shades of gray that represent the intensities for each spot on a microarray. This image can be used to explore any spatial effects across the microarray. For some examples of images showing different artifacts, have a look at: <http://plmimagegallery.bmbolstad.com/>.  
+7. Examine all the microarrays. Do you see any obvious problems?
+> :::
+
+```{r image-celfiles, cache=TRUE}
+par(mfrow=c(1, 2))
+image(celfiles)
+```
+
+### PM and MM probes
+
+> ::: {style="background-color: lightgray"}
+> In principle, the MM probes provide a measure of cross-hybridization to the corresponding PM probes. Crosshybridization is the tendency for a nucleic acid sequence to bind to other nucleic acid sequences that are almost, not perfectly complementary. Hence, subtracting the signal intensities of MM probes from those of PM probes should allow canceling of the effect of cross-hybridization. The intensities of the PM probes can be accessed with the pm() function.\
+> 8. How many PM probes are present on each microarray? The intensities of the MM probes can be accessed with the mm() function.
+> :::
+
+First, inspect the structure of the `pm()` return.
+
+```{r check-out-pm, cache=TRUE}
+head(pm(celfiles))
+```
+
+The number of PM probes can be obtained by counting the number of lines returned.
+
+```{r pm-probes, cache=TRUE}
+nrow(pm(celfiles))
+```
+
+Each microarray contains 604 258 perfect match probes.
+
+> ::: {style="background-color: lightgray"}
+> 9.  How many MM probes do you expect on each microarray? Now check. How many MM probes are there on each microarray? Typically, probe intensities are log-transformed. This is done for several reasons: it stabilizes the variance; it compresses the range of the data; and it makes the data more normally distributed.
+> :::
+
+The same number of mismatch probes as the perfect match probes are expected.
+
+```{r mm-probes, cache=TRUE}
+nrow(mm(celfiles))
+```
+
+Indeed, each microarray contains 604 258 mismatch probes.
+
+> ::: {style="background-color: lightgray"}
+> 10. Generate histograms of the intensities of the PM and MM probes for each microarray. Do you see any difference in the distributions of the PM and MM probes? Is this expected? Why?
+> :::
+
+```{r histogram-of-pm-mm-probes, eval=FALSE}
+hist(celfiles, col=2:7)
+plotDensity.AffyBatch(celfiles, col=2:7, ylab="PM density", xlab="Probes", which="pm")
+plotDensity.AffyBatch(celfiles, col=2:7, ylab="MM density", xlab="Probes", which="mm")
+```
+
+### Probe sets
+
+> ::: {style="background-color: lightgray"}
+> You can access the probe set identifiers through the geneNames() function.\
+> • Note that these are not gene names! If you would like to know more about the probe sets, register with the Affymetrix support site (<https://www.affymetrix.com/site/login/login.affx>), log in, and search for your probe set.\
+> 11. How many probe sets are on each microarray?
+> :::
+
+The info is contained in the object celfiles.
+
+```{r}
+celfiles
+```
+
+The number of probesets can also be obtained by the counting the number of objects returned with `geneNames`.
+
+```{r number-of-genenames, eval=FALSE}
+length(geneNames(celfiles))
+```
+
+> ::: {style="background-color: lightgray"}
+> Given one or several probe set identifiers, you can extract the corresponding intensities using the probeset() function.\
+> 12. How many probe pairs are there for "1552277_a\_at"?
+> :::
+
+Using the function `probeset()`, the information about the number of PM probes is returned, which form pairs with MM probes. We can see that the set for "1552277_a\_at" contains 11 probe pairs.
+
+```{r number-of-1552277-a-at}
+probeset(celfiles, genenames="1552277_a_at")
+```
+
+> ::: {style="background-color: lightgray"}
+> The probe set "1552277_a\_at" represents the MSANTD3 gene (<https://www.genecards.org/cgi-bin/carddisp.pl?gene=MSANTD3>). Little is known about this gene, except that it is associated with swine influenza infections. Probe set are S4 objects consisting of three slots: • "id": the probe set identifier. • "pm": a matrix with the PM probe intensities. -- Columns represent samples; rows represent probes. • "mm": a matrix with the MM probe intensities. -- Columns represent samples; rows represent probes.
+> :::
+
+> ::: {style="background-color: lightgray"}
+> 13. How many probe pairs are there for "1007_s\_at"? Extract the PM and MM intensities for "1007_s\_at".
+> :::
+
+The number of probe pairs for "1007_s\_at" can be obtained in the same manner as above with `probeset()`. Another, more roundabout way is also possible, returning just the number -- the `pm()` and `mm()` functions return a table with the columns representing the datasets and the rows representing the probes. Therefore, the number of probe pairs can be obtained by counting the rows.
+
+```{r number-of-1007s--at}
+probeset(celfiles, genenames="1007_s_at")
+nrow(pm(celfiles, genenames="1007_s_at"))
+```
+
+The intensities of the probes are returned in the data sets generated by `pm()` and `mm()`.
+
+```{r pm-mm-intensities-1007}
+pm(celfiles, genenames="1007_s_at")
+mm(celfiles, genenames="1007_s_at")
+```
+
+> ::: {style="background-color: lightgray"}
+> 14. Use the barplot.ProbeSet() function to visualize the intensities for the PM and MM probes of probe set "1552277_a\_at".
+> :::
+
+Following the steps in the Help page for `barplot.ProbeSet`, gene names are first extracted from the data set. Then, the position of the desired name is located within the list containing the gene names. The desired probe set is assigned to another variable
+
+```{r barplot-ProbeSet-1552277, cache=TRUE, warning=FALSE}
+gncel <- geneNames(celfiles)
+a <- which(gncel=="1552277_a_at")
+ppscel <- probeset(celfiles, gncel[a])[[1]]
+par(mfrow=c(1,2))
+barplot.ProbeSet(ppscel, main=colnames(ppscel), col.pm = "lightgreen", col.mm = "royalblue", ask = FALSE)
+```
+
+> ::: {style="background-color: lightgray"}
+> 15. How are the intensities for the PM probes compared to those of the MM probes? What does this suggest for the probe set (and the corresponding gene)?
+> :::
+
+See graphs. PM intensities are significantly higher than MM intensities. If PM intensity is high, then the MM intensity tends to be higher as well, yet not comparable to the PM intensity, suggesting higher concentration of binding DNA in the sample.
+
+> ::: {style="background-color: lightgray"}
+> • Examine the intensities of the probes for probe set "1007_s\_at". What can we conclude about the expression of this probe set (and the corresponding gene)?
+> :::
+
+```{r barplot-ProbeSet-1007, cache=TRUE, warning=FALSE}
+a <- which(gncel=="1007_s_at")
+ppscel <- probeset(celfiles, gncel[a])[[1]]
+par(mfrow=c(1,2))
+barplot.ProbeSet(ppscel, main=colnames(ppscel), col.pm = "lightgreen", col.mm = "royalblue", ask = FALSE)
+```
+
+The MM intensities are comparably strong to PM probe intensities. This means that the sample sequences do not bind that specifically to this probe set. Therefore, this probe set should not be used for further analysis.
+
+### Average background
+
+> ::: {style="background-color: lightgray"}
+> The average background of a given microarray is computed as the 2nd percentile of the PM and MM probe intensities in a given region of the microarray. This summary statistic is intended to measure optical background. Average background values ranging between 20 and 100 are typical for a good quality microarray. 16. What could lead to a higher average background?
+> :::
+
+Different incubation conditions lead to a different level of unspecific binding. Lower incubation temperature, longer incubation period, shorter rinsing, etc. can all lead to higher levels of unspecific binding and thus higher average background.
+
+### Scale factors
+
+> ::: {style="background-color: lightgray"}
+> The Bioconductor packages usually contain shortcuts to visualize complicated data types using common functions. For example, we can use the hist() function to visualize the distribution of the data: hist(celfiles, which="both", col=1:6, lty=1, lwd=1) 17. Similarly, you can create a boxplot using the boxplot() function. Try it.
+> :::
+
+```{r hist-dist-data, cache=TRUE}
+hist(celfiles, which="both", col=2:7, lty=1, lwd=1)
+```
+
+```{r boxplot-dist-data, cache=TRUE}
+boxplot(celfiles, which="both", col=2:7, las=2, cex.axis=0.5, main="Distribution of intensities\nin the data sets", ylab="log intensity")
+```
+
+> ::: {style="background-color: lightgray"}
+> 18. Are the intensities on the different microarrays comparable?
+> :::
+
+Yes, The intensities have similar quartiles, with a similar upper outlier limit. The fourth microarray has no lower outlier limit and has slightly lower intensities than the rest.
+
+> ::: {style="background-color: lightgray"}
+>Assuming that all other factors remain constant, the overall intensity observed for a given microarray reflects how much labeled target was hybridized to the probes. The median intensity of all PM and MM probes on a microarray are used to compute a summary statistic known as scale factor. Since the scale factor provide a measure of the overall intensities observed for a microarray, large variations in the scale factors of analyzed microarrays might indicate issues with RNA extraction, labeling, scanning or even microarray manufacture. Within an experiment, arrays are expected to have scale factors within 3-fold of each other; arrays whose scale factors are outside this range are considered to have poor quality.
+> :::
+
+### 3' to 5' ratios
+
+> ::: {style="background-color: lightgray"}
+> Affymetrix's standard labeling protocols rely on a reverse-transcription step. Reverse transcription proceeds from the 3' end of a sequence. Therefore, RNA degradation or problems during labeling, often lead to under representation at the 5' end of the sequence. The mRNA transcripts of GAPDH (<https://www.genecards.org/cgi-bin/carddisp.pl?gene=GAPDH>) and ACTB (<https://www.genecards.org/cgi-bin/carddisp.pl?gene=ACTB>) are relatively long and abundant in most cell types. Most Affymetrix microarrays contain separate probe sets targeting the 5', mid and 3' regions of these transcripts. By comparing the intensitiy values of the 3' probe set to either the mid or 5' probe set, it is possible to obtain a measure of the quality of the RNA hybridised to the microarray.\
+> • High ratios indicate RNA degradation or problems during labeling. GAPDH is shorter than ACTB.\
+> -- The ratio for GAPDH should be at or around 1 (and always less than 1.25).\
+> -- The ratio for ACTB should be below 3 to be considered acceptable.\
+> • All analyzed microarrays should have ratios in a similar range.\
+> Assess the average background, scale factors, and 3' to 5' ratios of the microarrays using the qc() function. The results can be visualized using the plot() function.
+> :::
+
+```{r 3-5-ratio, cache=TRUE}
+qccelfiles <- qc(celfiles)
+
+plot(qccelfiles)
+```
+
+> ::: {style="background-color: lightgray"}
+> In the resulting figure:\
+> • Dotted horizontal lines separate the figure into rows, one for each microarray.\
+> • The fraction of probe sets that are called present on each microarray (top) and the average background intensities (bottom) are written along the left hand side of the figure. In order to determine whether a given probe set is present, its PM and MM probe intensities are compared using one-sided Wilcoxon's signed rank test.\
+> -- If any microarray has a substantially different value compared to the others, the numbers will be shown in red, otherwise they will be blue.\
+> --- GAPDH ratios are plotted as circles. Values below 1 are displayed in blue; values above 1, in red.\
+> --- ACTB ratios are plotted as triangles. Values below three (recommended) are given in blue, those above three in red.\
+> • The central blue stripe represents the range where scale factors are within 3-fold of the mean across the scale factors of all analyzed microarrays:\
+> --- The scale factors are plotted as horizontal lines departing from the central vertical line of the figure. A line to the left corresponds to a down-scaling, to the right, to an up-scaling. If any scale factors fall outside this 3-fold region, they are all colored red, otherwise they are blue.\
+> • Dotted vertical lines provide a scale from --3 to 3.\
+> 19. Why should the fraction of probe sets that are called present on each microarray be similar among the different microarrays? How do you interpret your results?
+> :::
+
+It conveys information on how well the reverse transcription step was performed. Differences in 3' to 5' ratios mean that the start of the RNAs in the sample were reverse transcribed more frequently, degradation of RNA or problems with labelling, resulting in higher intensities on the microarray not representative of the sample.  
+All arrays in our sample are within the acceptable limits, though not ideal.
+
+### 2.2.7 Spike-in probe sets
+
+> ::: {style="background-color: lightgray"}
+> In addition to the probe sets for the endogenous GAPDH and ACTB, Affymetrix GeneChips contain probe sets for BioB, BioC, BioD and CreX. BioB, BioC, BioD and CreX are Bacillus subtiliis genes and no human mRNA transcript is supposed to bind them. The mRNA transcripts of BioB, BioC, BioD and CreX are added (spiked in) into the samples during their preparation.\
+> • BioB is added at a concentration of 1.5 pM, corresponding to approximately three transcripts per cell, the lower limit of detection for the system.\
+> • BioC, BioD and CreX are spiked-in at increasing concentrations.\
+> 20. Use the spikeInProbes() function to summarize the intensities of the spike-in probe sets, and the matplot() function to visualize them.\
+> • How do you interpret your results?
+> :::
+
+```{r spikeInProbes-matplot, cache=TRUE}
+sipcelfiles <- spikeInProbes(qccelfiles)
+
+matplot(sipcelfiles, xlab="Gene chips", ylab="Intensity")
+```
+
+The spiked-in probes follow the predicted rise in intensity in all samples, though some unspecific binding can be seen with some.
+
+### 2.2.8 MA plots
+
+> ::: {style="background-color: lightgray"}
+> A MA plot is a scatter plot designed to detect differences between the labels in two-color microarrays. In twocolor microarrays, two biological samples are labeled with different fluorescent dyes, usually Cyanine 3 (Cy3) and Cyanine 5 (Cy5), and then hybridized to the same array. M and A are defined as follows:\
+> M = log2(R/G) = log2(R) -- log2(G)\
+> and\
+> A= 1/2 log2(RG) = 1/2(log2(R) + log2(G))\
+> where R is the Cy5 intensity and G is the Cy3 intensity. M is plotted against A.\
+> Affymetrix GeneChips use single-color labeling. Given a microarray,\
+> • M is the difference between the (logarithm of the) intensity of a probe on the microarray and the median (logarithm of the) intensity of the probe across all analyzed microarrays.\
+> • A is the average of the (logarithm of the) intensity of a probe on the microarray and the median (logarithm of the) intensity of that probe across all analyzed microarrays.\
+> A MA plot identifies intensity-related biases.\
+> 21. Produce a MA plot for each microarray separately using the `MAplot()` function with the option `which`.\
+> • The red line is a locally estimated scatterplot smoothing (loess) regression curve based on the data. Ideally, the cloud of data points in the MA-plot should be centered around M=0 (blue line). What is the assumption?\
+> • Do any issues come up for certain microarrays and can you explain why?
+> :::
+
+We assume that most genes don't have a changed expression level (log(1)=0), so they should be centered around the blue M=0 line. The loess line should be straight, and if not, the data has to be normalized before further analysis.
+
+```{r MAplot, cache=TRUE, cache=TRUE}
+par(mfrow=c(1,2))
+sncel <- colnames(celfiles)[-4]
+MAplot(celfiles, which=sncel)
+```
+
+### 2.2.9 RLE and NUSE plots
+
+> ::: {style="background-color: lightgray"}
+> For a given microarray, the RLE (Relative Log Expression) value of a probe set is the ratio between the expression value of the probe set and the median expression value of the probe set across all microarrays analyzed. The ratios are then log-transformed. The expression value of a probe set is estimated using robust regression, as a function of probe and microarray effects. Basically, the aim is to down-weight outlier probes. This is implemented in the "affyPLM" (<https://www.bioconductor.org/packages/release/bioc/html/affyPLM.html>) R/Bioconductor package.\
+> 22. Use the "affyPLM()" function to estimate the probe set expression values.
+> :::
+
+```{r affyPLM-package, eval=FALSE}
+BiocManager::install("affyPLM")
+```
+
+```{r load-affyPLM, message=FALSE}
+library(affyPLM)
+```
+
+I could not find any documentation on a function called `affyPLM`. Since following tasks ask for a PLMset that is created with `fitPLM`, I assume that there is a typo in the instructions and I was supposed to use that. :)
+
+```{r fitPLM, cache=TRUE}
+fitcel <- fitPLM(celfiles)
+```
+
+Let's check it out:
+
+```{r look-at-fitcel}
+fitcel
+```
+
+> ::: {style="background-color: lightgray"}
+> 23. Visualize the distribution of the RLE values of the probe sets of each microarray using the RLE() function.
+> :::
+
+```{r RLE, cache=TRUE}
+RLE(fitcel, main="Distribution of RLE values", las=2, cex.axis=0.5, col=2:7)
+```
+
+> ::: {style="background-color: lightgray"}
+> 24. Assuming that the expression levels of most genes (and, hence, their probe sets) will remain constant during an experiment, what should be the median of each distribution in an ideal experiment? What about the spread of the distribution? How should it look like in an ideal experiment?\
+>     • Do any of your microarrays deviate from the expectation?
+> :::
+
+Most genes' expression is not influenced by the different condition, meaning that all would have a comparable distribution of expression values. In an ideal experiment, the median of each distribution should be the same, indicating that the intensities accross samples are comparable. Likewise, the spread of distributions should also be the same. An ideal expreiment would produce microarrays with similar intensities and distributions -- the generated boxplots should all be centered on the same line and be similarly wide in their quartiles.  
+Looking at the plot, we see that the 4th sample/microarray has a wider distribution of RLE than the others.
+
+> ::: {style="background-color: lightgray"}
+> The Normalized Unscaled Standard Error (NUSE) plot visualizes the distribution of the standard errors of the model. On the NUSE plot, the standard errors are standardized so that that for each probe set, the median standard error across all analyzed microarrays is equal to 1.\
+> • As a rule of thumb, a median equal to or greater than 1.05 indicates quality problems, which are often also detected by other QC analyses.\
+> 25. Produce a NUSE plot using the NUSE() function and interpret your results.\
+> • Do any of your microarrays deviate from the expectation?
+> :::
+
+```{r NUSE, cache=TRUE}
+NUSE(fitcel, main="NUSE plot of celfiles", col=2:7, las=2, cex.axis=0.5)
+```
+
+Again, the 4th sample/microarray has a wider distribution than the others. The values of the 2nd and especially the 4th sample are on average higher, while the values of the 1st and 2nd are slightly below 1.
+
+## 2.3 Calculating expression values
+
+> ::: {style="background-color: lightgray"}
+> Many background correction and normalization algorithms have been developed to correct for non-biological differences in microarray signals (Table 2).\
+> • These algorithms employ different methods for background correction, normalization, and probe set summarization.
+> :::
+
+### 2.3.1 Robust Multi-Array Average (RMA)
+
+> ::: {style="background-color: lightgray"}
+> The Robust Multi-array Average (RMA) algorithm summarizes each probe set as a robust multi-array average of log-transformed, background-adjusted, normalized PM intensities. The resulting value is known as the expression value of the probe set.\
+> • RMA ignores MM probes entirely: although the MM probes definitely have information, using it without adding noise has proved a challenge.
+> :::
+
+#### Background correction
+
+#### Normalization between arrays
+
+#### Summarization of the probe sets
+
+> ::: {style="background-color: lightgray"}
+> Apply the RMA algorithm as implemented in the `rma()` function:\
+> `eset <- rma(celfiles)`\
+> 26. What object is returned by the rma() function? Which slots does the object contain ? Ask for some help about this class of objects.
+> :::
+
+```{r RMA-summarization-of-probe-sets, cache=TRUE}
+eset <- rma(celfiles)
+class(eset)
+```
+
+`rma()` transforms an 'AffyBatch' object into an 'ExpressionSet' object.
+The object calss is described in the Biobase documentation as:  
+"The data in an ExpressionSet is complicated, consisting of expression data from microarray experiments (assayData; assayData is used to hint at the methods used to access different data components, as we will see below), ‘meta-data’ describing samples in the experiment (phenoData), annotations and meta-data about the features on the chip or technology used for the experiment (featureData, annotation), information related to the protocol used for processing each sample (and usually extracted from manufacturer files, protocolData), and a flexible structure to describe the experiment (experimentData). The ExpressionSet class coordinates all of this data, so that you do not usually have to worry about the de-tails."
+
+> ::: {style="background-color: lightgray"}
+> The exprs() function returns the expression values of the probe sets as a matrix:\
+> `rma.exprs <- exprs(eset)`\
+> Following background correction, normalization, and probe set summarization, diagnostic plots should be used to assess the quality of the data.\
+> 27. Visualize the distribution of the expression values using the boxplot() function.
+> :::
+
+```{r exprs-thingy, cache=TRUE}
+rma.exprs <- exprs(eset)
+boxplot(rma.exprs, main="Distribution of the expression values", las=2, cex.axis=0.5, col=2:7)
+```
+
+> ::: {style="background-color: lightgray"}
+> 28. What is the difference between these boxplots and the ones in 17?
+> :::
+
+```{r boxplot-compare, cache=TRUE}
+par(mfrow=c(1,2))
+boxplot(celfiles, which="both", col=2:7, las=2, cex.axis=0.5, main="Task 17")
+boxplot(rma.exprs, main="Task 27", las=2, cex.axis=0.5, col=2:7)
+```
+
+We see the oultier limits in the plot of task 27 are calculated differently, being much closer to the "box" than in task 17. That is because the expression values have been corrected in the above step.
+
+> ::: {style="background-color: lightgray"}
+> 29. Do the background correction and normalization procedures correct all the differences between the analyzed microarrays?
+> Depending on the QC assessment, you may decide to discard some of the data before proceeding with the differential expression analysis.\
+> 30. Would you discard any of the microarrays based on your previous results?
+> :::
+
+The 4th data set does not meet the required standards and is missing part of the data. It can therefore be discarded.
+
+### 2.3.2 Testing for differential expression
+
+> ::: {style="background-color: lightgray"}
+> The goal of differential expression analysis is to identify genes whose expression differs under different conditions.\
+> We assume a linear model\
+> Y = X + \
+> where Y is a vector containing the expression values of the probe sets, X is the design matrix,  is a vector of regression coefficients and  is a normally distributed error term.\
+> The choice of design matrix is a critical step in linear modeling since it encodes which coefficients will be fit in the model, as well as the inter-relationship between the samples. Here we will compare between two groups of samples: iris versus retina. We encode this experimental design in R with two steps:\
+> (i) We start a formula with the tilde symbol (˜).\
+> (ii) Then we write the name of the variable that separates the samples into two groups.\
+> In our case, the variable is called "Target":\
+> `X <- model.matrix(~celfiles$Target)`\
+> This design matrix has two columns because there are two parameters in this conceptual design: the expression level in each of the two groups. Column 1 represents the expression of the iris group and column 2 represents the difference in expression level from the retina group to the iris group.\
+> • Testing that the two groups have the same expression level is done by testing whether the second parameter (equal to the difference in expression between the two groups) is equal to zero.\
+> A different parametrization is\
+> `X <- model.matrix(~ celfiles$Target - 1)`\
+> `colnames(X) <- c("iris", "retina")`\
+> In this design matrix, the two parameters corresponding to the two columns represent the expression levels in the two groups.\
+> • Testing that the two groups have the same expression level is done by asking whether these two parameters are the same.\
+> We will use the limma R/Bioconductor (<https://www.bioconductor.org/packages/release/bioc/html/limma.html>) package to fit a linear model to each probe set.\
+> `fit1 <- lmFit(eset, X)`\
+> Significance testing can be done for each parameter, to which limma refers as "contrasts". We are interested in an association between probe set expression and tissue of origin:\
+> `contrast.matrix <- makeContrasts(irisvsretina="iris-retina", levels=X)`\
+> Given a linear model and a set of contrasts, we can now compute the estimated coefficients and standard errors for that particular set of contrasts:\
+> `fit2 <- contrasts.fit(fit1, contrast.matrix)`\
+> Finally, we compute the moderated t-statistic, empirically shrinking the residual variance of each probe set:\
+> `fit3 <- eBayes(fit2)`\
+> and use the function topTable to extract the results. The column "adj.P.Val" contains false discovery rate (FDR) adjusted P-values:\
+> `topTable(fit3, coef=1, n=5, adjust.method="fdr")`\
+> 31. At a significance level of 0.05, how many probe sets are differentially expressed?
+> :::
+
+Install limma:
+
+```{r limma-package, eval=FALSE}
+BiocManager::install("limma")
+```
+
+```{r message=FALSE}
+library(limma)
+```
+
+Specify the model matrix:
+
+```{r whatever-the-hickety-heck-that-was, cache=TRUE}
+X <- model.matrix(~ celfiles$Target - 1)
+colnames(X) <- c("iris", "retina")
+```
+
+Specify the fits and contrast matrix:
+
+```{r fits, cache=TRUE}
+fit1 <- lmFit(eset, X)
+
+contrast.matrix <- makeContrasts(iris-retina, levels=X)
+
+fit2 <- contrasts.fit(fit1, contrast.matrix)
+
+fit3 <- eBayes(fit2)
+```
+
+Following the script, only the 5 most expressed genes are selected
+
+```{r stats, cache=TRUE}
+statscel <- topTable(fit3, coef=1, n=5, adjust.method="fdr")
+
+statscel
+```
+
+To get all, we can adjust our parameter `n`:
+
+```{r i-want-it-all, cache=TRUE}
+statscelall <- topTable(fit3, coef=1, n=nrow(fit3), adjust.method="fdr")
+```
+
+We have extracted all information about the expression level. We can sort it with the help of `dplyr` by filtering for all with the change in expression under out selected limit of 0.05.
+
+```{r dplyr-library, message=FALSE}
+library(dplyr)
+difexpr <- statscelall %>% select(adj.P.Val) %>% filter(adj.P.Val < 0.05)
+```
+
+We can see that the tail end of our genes with the desired change in expression contains values of jsut below 0.05. We can now count the rows, representing the probes.
+
+```{r filter-statscelall}
+tail(difexpr)
+nrow(difexpr)
+```
+
+### 2.3.3 Volcano plots
+
+> ::: {style="background-color: lightgray"}
+> A volcano plot is a scatter plot that is used to identify changes between two conditions. It plots the significance (--log10 P-value) on the y-axis and the fold-change on the x axes. 32. Generate a volcano plot.
+> :::
+
+Instal EnhancedVolcano package.
+
+```{r yet-another-package, eval=FALSE}
+BiocManager::install("EnhancedVolcano", update = FALSE)
+```
+
+```{r load-EnhancedVolcano, message=FALSE}
+library(EnhancedVolcano)
+```
+
+```{r volcanoplot, cache=TRUE}
+#lablscel <- rownames(celfiles)
+volcanocel <- EnhancedVolcano::EnhancedVolcano(statscelall,
+  lab = rownames(statscelall),
+  x = "logFC",
+  y = "P.Value"
+)
+volcanocel
+```
